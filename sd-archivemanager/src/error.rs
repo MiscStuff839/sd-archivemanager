@@ -1,6 +1,6 @@
-
 use snafu::Snafu;
 use xdg::BaseDirectoriesError;
+
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
 #[snafu(visibility(pub))]
@@ -11,15 +11,15 @@ pub enum Error {
         file: String,
     },
     #[snafu(display("Invalid configuration: {}", source))]
-    InvalidConfig {
-        source: toml::de::Error,
-    },
+    InvalidConfig { source: toml::de::Error },
     #[snafu(display("Invalid regex: {}", source))]
-    InvalidRegex {
-        source: regex::Error,
-    },
+    InvalidRegex { source: regex::Error },
     #[snafu(display("Invalid path: {}", source))]
-    XdgError {
-        source: BaseDirectoriesError,
+    XdgError { source: BaseDirectoriesError },
+    #[snafu(whatever, display("{}\nunderlying: {:#?}", message, source))]
+    Whatever {
+        #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
+        source: Option<Box<dyn std::error::Error>>,
+        message: String,
     },
 }

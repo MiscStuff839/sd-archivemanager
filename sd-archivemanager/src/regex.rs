@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, io::Write};
+use std::fs::{self, File};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};

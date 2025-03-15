@@ -1,7 +1,7 @@
 use crate::error::*;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use snafu::{ensure, ResultExt};
+use snafu::ResultExt;
 use std::{fs::OpenOptions, io::{self, Write}, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

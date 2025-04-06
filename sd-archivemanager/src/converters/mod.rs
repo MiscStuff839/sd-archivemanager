@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::Read,
-    sync::MutexGuard,
+    sync::{Arc, MutexGuard},
 };
 
 use cookie_store::CookieStore;
@@ -12,20 +12,25 @@ use snafu::{OptionExt, ResultExt, ensure_whatever};
 
 use crate::{
     config::Config,
-    error::{Error, IoSnafu, ReqwestSnafu},
+    error::{CookieStoreSnafu, Error, IoSnafu, ReqwestSnafu},
 };
 
 mod case_law;
 mod eo;
 mod legislation;
 
-pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
+pub fn login(cfg: &MutexGuard<'_, Config>) -> Result<(), Error> {
+    let (mut file, cookie_store) = get_cookies()?;
+    let cookies = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store));
     let mut form = HashMap::new();
     form.insert("action", "query");
     form.insert("meta", "tokens");
     form.insert("type", "login");
     form.insert("format", "json");
-    let client = Client::new();
+    let client = Client::builder()
+        .cookie_provider(Arc::clone(&cookies))
+        .build()
+        .context(ReqwestSnafu)?;
     let login = &client
         .post(&cfg.endpoint)
         .form(&form)
@@ -40,36 +45,57 @@ pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
     form.insert("format", "json");
     form.insert("action", "clientlogin");
     form.insert("loginreturnurl", &cfg.endpoint);
-    form.insert("logintoken", &login);
+    form.insert("logintoken", login);
     form.insert("username", &cfg.login);
     form.insert("password", &cfg.passwd);
-    let login = client.post(&cfg.endpoint).form(&form);
-    let response = login
+    let login = client
+        .post(&cfg.endpoint)
+        .form(&form)
         .send()
         .context(ReqwestSnafu)?
         .json::<Value>()
         .context(ReqwestSnafu)?;
     ensure_whatever!(
-        response["clientlogin"]["status"].as_str() == Some("PASS"),
+        login["clientlogin"]["status"].as_str() == Some("PASS"),
         "Login failed: {}",
-        &response
+        &login
     );
-    drop(response);
+    cookies
+        .lock()
+        .unwrap()
+        .save(&mut file, |s| serde_json::to_string(s))
+        .expect("failed to save cookies");
+    Ok(())
+}
+
+pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
+    let (_, cookie_store) = get_cookies()?;
+    let cookies = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store));
+    let client = Client::builder()
+        .cookie_provider(Arc::clone(&cookies))
+        .build()
+        .context(ReqwestSnafu)?;
     let mut form = HashMap::new();
-    form.insert("format", "json");
     form.insert("action", "query");
     form.insert("meta", "tokens");
-    let csrf = &client
-        .get(&cfg.endpoint)
-        .query(&form)
+    form.insert("type", "csrf");
+    form.insert("format", "json");
+    let response = client
+        .post(&cfg.endpoint)
+        .form(&form)
         .send()
         .context(ReqwestSnafu)?
         .json::<Value>()
-        .context(ReqwestSnafu)?["query"]["tokens"]["csrftoken"];
-    Ok(csrf
+        .context(ReqwestSnafu)?;
+    ensure_whatever!(
+        response["query"]["tokens"]["csrftoken"].as_str().is_some(),
+        "failed to get token: {}",
+        &response
+    );
+    Ok(response["query"]["tokens"]["csrftoken"]
         .as_str()
-        .whatever_context("invalid response")?
-        .to_string())
+        .unwrap()
+        .to_owned())
 }
 
 fn get_cookies() -> Result<(File, CookieStore), Error> {
@@ -100,13 +126,22 @@ fn get_cookies() -> Result<(File, CookieStore), Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use crate::CONFIG;
 
     use super::*;
 
     #[test]
     fn test_get_login() {
-        let token = get_token(&CONFIG.lock().unwrap()).unwrap();
-        dbg!(token);
+        login(&CONFIG.lock().unwrap()).unwrap();
+        let _ = get_token(&CONFIG.lock().unwrap()).unwrap();
+        fs::remove_file(
+            xdg::BaseDirectories::with_prefix("sd-archivemanager")
+                .unwrap()
+                .place_data_file("cookies.json")
+                .unwrap(),
+        )
+        .unwrap();
     }
 }

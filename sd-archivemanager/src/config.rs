@@ -2,23 +2,24 @@ use crate::error::*;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
-use std::{fs::OpenOptions, io::{self, Write}, path::PathBuf};
+use std::{
+    env,
+    fs::OpenOptions,
+    io::{self, Write},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
-    wiki: PathBuf,
-    token: String,
+    pub token: String,
+    pub login: String,
+    pub passwd: String,
+    pub endpoint: String,
+    pub bot: bool,
 }
 
 impl Config {
-    pub fn set_wiki(&mut self, wiki: PathBuf) {
-        self.wiki = wiki;
-    }
     pub fn set_token(&mut self, token: String) {
         self.token = token;
-    }
-    pub fn get_wiki(&self) -> &PathBuf {
-        &self.wiki
     }
     pub fn get_token(&self) -> &String {
         &self.token
@@ -30,11 +31,7 @@ impl Config {
                 .place_config_file("config.toml")
                 .map_err(|err| Error::IoError {
                     source: err,
-                    file: xdg_dirs
-                        .get_config_home()
-                        .join("config.toml")
-                        .to_string_lossy()
-                        .to_string(),
+                    file: xdg_dirs.get_config_home().join("config.toml"),
                 })?;
         let mut conf_file = OpenOptions::new()
             .write(true)
@@ -42,21 +39,13 @@ impl Config {
             .open(conf_file)
             .map_err(|err| Error::IoError {
                 source: err,
-                file: xdg_dirs
-                    .get_config_home()
-                    .join("config.toml")
-                    .to_string_lossy()
-                    .to_string(),
+                file: xdg_dirs.get_config_home().join("config.toml"),
             })?;
         conf_file
             .write_all(toml::to_string(self).unwrap().as_bytes())
             .map_err(|err| Error::IoError {
                 source: err,
-                file: xdg_dirs
-                    .get_config_home()
-                    .join("config.toml")
-                    .to_string_lossy()
-                    .to_string(),
+                file: xdg_dirs.get_config_home().join("config.toml"),
             })?;
         Ok(())
     }
@@ -66,24 +55,22 @@ impl Config {
         if conf_file.is_none() {
             return Err(Error::IoError {
                 source: io::Error::new(io::ErrorKind::NotFound, "config.toml not found"),
-                file: xdg_dirs
-                    .get_config_home()
-                    .join("config.toml")
-                    .to_string_lossy()
-                    .to_string(),
+                file: xdg_dirs.get_config_home().join("config.toml"),
             });
         }
         let conf_file = conf_file.unwrap();
-        Ok(toml::from_str::<Config>(
-            &std::fs::read_to_string(conf_file).map_err(|err| Error::IoError {
-                source: err,
-                file: xdg_dirs
-                    .get_config_home()
-                    .join("config.toml")
-                    .to_string_lossy()
-                    .to_string(),
-            })?,
-        ).context(InvalidConfigSnafu)?)
+        let mut config =
+            toml::from_str::<Config>(&std::fs::read_to_string(conf_file).map_err(|err| {
+                Error::IoError {
+                    source: err,
+                    file: xdg_dirs.get_config_home().join("config.toml"),
+                }
+            })?)
+            .context(InvalidConfigSnafu)?;
+        if config.token == "TO BE FILLED" {
+            config.set_token(env::var("DISCORD_TOKEN").unwrap_or("TO BE FILLED".to_string()));
+        }
+        Ok(config)
     }
 }
 
@@ -98,16 +85,18 @@ impl Default for Config {
             .create(true)
             .open(conf_file)
             .expect("unable to open config file");
-        let data_dir = xdg_dirs
-            .create_data_directory("wiki")
-            .expect("unable to create data directory");
+        let config = Config {
+            token: env::var("DISCORD_TOKEN").unwrap_or("TO BE FILLED".to_string()),
+            passwd: env::var("PASSWD").unwrap_or("TO BE FILLED".to_string()),
+            login: env::var("LOGIN").unwrap_or("TO BE FILLED".to_string()),
+            endpoint: "https://qwrky.dev/mediawiki/api.php".to_string(),
+            bot: true,
+        };
         conf_file
             .write_all(
-                format!(
-                    "wiki = \"{}\"\ntoken = \"TO BE FILLED\"",
-                    data_dir.to_string_lossy()
-                )
-                .as_bytes(),
+                toml::to_string(&config)
+                    .expect("unable to serialize default config")
+                    .as_bytes(),
             )
             .expect("unable to write to config file");
         println!(
@@ -118,22 +107,28 @@ impl Default for Config {
                 .to_string_lossy()
                 .red()
         );
-        Config {
-            wiki: data_dir,
-            token: "TO BE FILLED".to_string(),
-        }
+        config
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, str::FromStr};
+    use std::fs;
 
     use super::*;
     #[test]
     fn create_default() {
         let config = super::Config::default();
-        assert!(config.wiki.exists());
+        assert_eq!(
+            config,
+            Config {
+                token: env::var("DISCORD_TOKEN").unwrap_or("TO BE FILLED".to_string()),
+                passwd: env::var("PASSWD").unwrap_or("TO BE FILLED".to_string()),
+                login: env::var("LOGIN").unwrap_or("TO BE FILLED".to_string()),
+                endpoint: "https://qwrky.dev/mediawiki/api.php".to_string(),
+                bot: true
+            }
+        );
     }
     #[test]
     fn parse_config() {
@@ -143,19 +138,24 @@ mod tests {
         assert_eq!(
             config,
             Config {
-                wiki: PathBuf::from_str("/root/.local/share/sd-archivemanager/wiki").unwrap(),
-                token: "TO BE FILLED".to_string()
+                token: env::var("DISCORD_TOKEN").unwrap_or("TO BE FILLED".to_string()),
+                passwd: env::var("PASSWD").unwrap_or("TO BE FILLED".to_string()),
+                login: env::var("LOGIN").unwrap_or("TO BE FILLED".to_string()),
+                endpoint: "https://qwrky.dev/mediawiki/api.php".to_string(),
+                bot: true
             }
         );
         let config = Config::load().unwrap();
         assert_eq!(
             config,
             Config {
-                wiki: PathBuf::from_str("/root/.local/share/sd-archivemanager/wiki").unwrap(),
-                token: "TO BE FILLED".to_string()
+                token: env::var("DISCORD_TOKEN").unwrap_or("TO BE FILLED".to_string()),
+                passwd: env::var("PASSWD").unwrap_or("TO BE FILLED".to_string()),
+                login: env::var("LOGIN").unwrap_or("TO BE FILLED".to_string()),
+                endpoint: "https://qwrky.dev/mediawiki/api.php".to_string(),
+                bot: true
             }
         );
-        fs::remove_dir_all(config.wiki).unwrap();
         fs::remove_file("/root/.config/sd-archivemanager/config.toml").unwrap();
     }
 }

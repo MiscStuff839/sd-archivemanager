@@ -3,7 +3,10 @@ use std::{fs::OpenOptions, io::Write};
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
 
-use crate::{context_opt, error::{Error, IoSnafu}};
+use crate::{
+    context_opt,
+    error::{Error, FileNotFoundSnafu, IoSnafu},
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Guilds {
@@ -12,10 +15,10 @@ pub struct Guilds {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct GuildInfo {
-    id: u64,
-    name: String,
-    eo_src: u64,
-    leg_src: u64,
+    pub id: u64,
+    pub name: String,
+    pub eo_src: u64,
+    pub leg_src: u64,
 }
 
 impl Guilds {
@@ -54,13 +57,15 @@ impl Guilds {
     }
     pub fn load() -> Result<Self, Error> {
         let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").unwrap();
-        let guilds_file = xdg.find_data_file("guilds.toml").whatever_context("no guilds file")?;
+        let guilds_file = xdg
+            .find_data_file("guilds.toml")
+            .context(FileNotFoundSnafu {
+                file: xdg.get_data_home().join("guilds.toml"),
+            })?;
         let content = std::fs::read_to_string(&guilds_file).context(IoSnafu {
             file: xdg
                 .get_data_home()
                 .join("guilds.toml")
-                .to_string_lossy()
-                .to_string(),
         })?;
         let guilds: Guilds = toml::from_str(&content).unwrap();
         Ok(guilds)

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use snafu::Snafu;
 use xdg::BaseDirectoriesError;
 
@@ -5,10 +7,10 @@ use xdg::BaseDirectoriesError;
 #[non_exhaustive]
 #[snafu(visibility(pub))]
 pub enum Error {
-    #[snafu(display("I/O error for {file}: {source}"))]
+    #[snafu(display("I/O error for {}: {source}", file.to_string_lossy()))]
     IoError {
         source: std::io::Error,
-        file: String,
+        file: PathBuf,
     },
     #[snafu(display("Invalid configuration: {}", source))]
     InvalidConfig { source: toml::de::Error },
@@ -22,4 +24,12 @@ pub enum Error {
         source: Option<Box<dyn std::error::Error>>,
         message: String,
     },
+    #[snafu(display("File not found: {}", file.to_string_lossy()))]
+    FileNotFound { file: PathBuf },
+    #[snafu(display("Reqwest error: {}", source))]
+    ReqwestError { source: reqwest::Error },
+    #[snafu(display("Invalid JSON: {}", source))]
+    JSONError { source: serde_json::Error },
+    #[snafu(display("Cookie store error: {}", source))]
+    CookieStoreError { source: cookie_store::Error}
 }

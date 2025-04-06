@@ -1,20 +1,18 @@
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{BufWriter, Read},
-    sync::{Arc, MutexGuard},
+    io::Read,
+    sync::MutexGuard,
 };
 
-use reqwest::{blocking::Client, header::HeaderMap};
-use reqwest_cookie_store::CookieStore;
-use serde::Serialize;
+use cookie_store::CookieStore;
+use reqwest::blocking::Client;
 use serde_json::Value;
-use snafu::{ResultExt, ensure_whatever};
+use snafu::{OptionExt, ResultExt, ensure_whatever};
 
 use crate::{
     config::Config,
-    cookies_to_string,
-    error::{CookieStoreSnafu, Error, IoSnafu, ReqwestSnafu, XdgSnafu},
+    error::{Error, IoSnafu, ReqwestSnafu},
 };
 
 mod case_law;
@@ -27,28 +25,17 @@ pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
     form.insert("meta", "tokens");
     form.insert("type", "login");
     form.insert("format", "json");
-    let (cookie_file, cookies) = get_cookies()?;
-    let cookies = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookies));
-    let client = Client::builder()
-        .cookie_provider(Arc::clone(&cookies))
-        .build()
-        .context(ReqwestSnafu)?;
+    let client = Client::new();
     let login = &client
         .post(&cfg.endpoint)
         .form(&form)
-        .header("Cookie", cookies_to_string!(cookies))
         .send()
         .context(ReqwestSnafu)?
         .json::<Value>()
-        .context(ReqwestSnafu)?
-        .get("query")
-        .unwrap()
-        .get("tokens")
-        .unwrap()
-        .get("logintoken")
-        .unwrap()
-        .to_string();
-    dbg!(&login.as_bytes());
+        .context(ReqwestSnafu)?["query"]["tokens"]["logintoken"]
+        .as_str()
+        .whatever_context("invalid response")?
+        .to_owned();
     let mut form = HashMap::new();
     form.insert("format", "json");
     form.insert("action", "clientlogin");
@@ -57,15 +44,13 @@ pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
     form.insert("username", &cfg.login);
     form.insert("password", &cfg.passwd);
     let login = client.post(&cfg.endpoint).form(&form);
-    dbg!(&login.try_clone().unwrap().build().unwrap().body());
     let response = login
-        .header("Cookie", cookies_to_string!(cookies))
         .send()
         .context(ReqwestSnafu)?
         .json::<Value>()
         .context(ReqwestSnafu)?;
     ensure_whatever!(
-        response["clientlogin"]["status"].to_string() == "PASS",
+        response["clientlogin"]["status"].as_str() == Some("PASS"),
         "Login failed: {}",
         &response
     );
@@ -76,19 +61,15 @@ pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
     form.insert("meta", "tokens");
     let csrf = &client
         .get(&cfg.endpoint)
-        .header("Cookie", cookies_to_string!(cookies))
         .query(&form)
         .send()
         .context(ReqwestSnafu)?
         .json::<Value>()
         .context(ReqwestSnafu)?["query"]["tokens"]["csrftoken"];
-    let store = cookies.lock().unwrap();
-    store
-        .save(&mut BufWriter::new(cookie_file), |c| {
-            serde_json::to_string_pretty(c)
-        })
-        .context(CookieStoreSnafu)?;
-    Ok(csrf.as_str().unwrap().to_string())
+    Ok(csrf
+        .as_str()
+        .whatever_context("invalid response")?
+        .to_string())
 }
 
 fn get_cookies() -> Result<(File, CookieStore), Error> {

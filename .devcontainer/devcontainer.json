@@ -10,7 +10,7 @@
 	},
 	"features": {
 		"ghcr.io/devcontainers/features/rust:1": {}
-	}
+	},
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
@@ -26,4 +26,7 @@
 
 	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "devcontainer"
+	"mounts": [
+		"type=bind,source=/home/${localEnv:USER}/.ssh,target=/root/.ssh,readonly"
+	]
 }

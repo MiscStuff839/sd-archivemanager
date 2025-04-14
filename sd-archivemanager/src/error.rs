@@ -31,5 +31,7 @@ pub enum Error {
     #[snafu(display("Invalid JSON: {}", source))]
     JSONError { source: serde_json::Error },
     #[snafu(display("Cookie store error: {}", source))]
-    CookieStoreError { source: cookie_store::Error}
+    CookieStoreError { source: cookie_store::Error},
+    #[snafu(display("Extism error: {}", source))]
+    ExtismError { source: extism::Error}
 }

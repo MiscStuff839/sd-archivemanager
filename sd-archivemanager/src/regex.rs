@@ -17,6 +17,7 @@ pub struct Profile {
     pub for_title: bool,
     pub name: String,
     pub replace: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -30,6 +31,7 @@ impl RegexManager {
         user: &str,
         name: &str,
         for_title: bool,
+        target: &str,
         replace: String,
     ) -> Result<(), Error> {
         if let Some(ref mut profiles_vec) = self.profile {
@@ -39,6 +41,7 @@ impl RegexManager {
                 for_title,
                 name: name.to_string(),
                 replace,
+                target: target.to_string(),
             });
         } else {
             self.profile = Some(vec![Profile {
@@ -47,6 +50,7 @@ impl RegexManager {
                 for_title,
                 name: name.to_string(),
                 replace,
+                target: target.to_string(),
             }]);
         }
         Ok(())
@@ -82,7 +86,6 @@ impl RegexManager {
         let path = xdg
             .find_data_file("regex.toml")
             .whatever_context("unable to find file")?;
-        dbg!(&path);
         let profiles = toml::from_str::<RegexManager>(
             fs::read_to_string(&path)
                 .map_err(|e: std::io::Error| Error::IoError {
@@ -94,17 +97,24 @@ impl RegexManager {
         .context(InvalidConfigSnafu)?;
         Ok(profiles)
     }
-    pub fn get_regexs(&self, user: &str) -> Option<Vec<Profile>> {
+    pub fn get_regexs(&self, user: &str) -> Vec<Profile> {
         match &self.profile {
-            None => None,
+            None => vec![],
             Some(p) => {
                 let mut vec = p
                     .iter()
-                    .filter(|x| x.author == user || x.author == "*")
+                    .filter(|x| {
+                        x.author
+                            .split(',')
+                            .map(|y| y.trim())
+                            .collect::<Vec<_>>()
+                            .contains(&user)
+                            || x.author == "*"
+                    })
                     .cloned()
                     .collect::<Vec<Profile>>();
                 vec.sort_by(|x, y| x.name.cmp(&y.name));
-                Some(vec)
+                vec
             }
         }
     }
@@ -153,15 +163,16 @@ mod tests {
             "xyz".to_string(),
             "testuser",
             "Testing",
-            false,
+            false, "eo",
             "abc".to_string(),
         )
         .unwrap();
         rgx.save().unwrap();
-        let content = fs::read_to_string("/root/.local/share/sd-archivemanager/regex.toml").unwrap();
+        let content =
+            fs::read_to_string("/root/.local/share/sd-archivemanager/regex.toml").unwrap();
         assert_eq!(
             content,
-            "[[profile]]\nauthor = \"testuser\"\nregex = \"xyz\"\nfor_title = false\nname = \"Testing\"\nreplace = \"abc\"\n"
+            "[[profile]]\nauthor = \"testuser\"\nregex = \"xyz\"\nfor_title = false\nname = \"Testing\"\nreplace = \"abc\"\ntarget = \"eo\"\n"
         );
         let _ = fs::remove_file("/root/.local/share/sd-archivemanager/regex.toml");
     }
@@ -173,7 +184,7 @@ mod tests {
             r#"\s"#.to_string(),
             "f3rri5_",
             "001-Replace spaces",
-            true,
+            true, "eo",
             r#":"#.to_string(),
         )
         .unwrap();

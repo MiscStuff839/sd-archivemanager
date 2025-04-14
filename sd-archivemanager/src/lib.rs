@@ -4,10 +4,11 @@ use config::Config;
 pub use once_cell::sync::Lazy;
 
 pub mod config;
-mod converters;
+pub mod converters;
 pub mod error;
 pub mod guilds;
 pub mod regex;
+pub mod plugins;
 
 #[macro_export]
 macro_rules! context_opt {

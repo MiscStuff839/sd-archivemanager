@@ -15,25 +15,38 @@ use crate::{
     error::{CookieStoreSnafu, Error, IoSnafu, ReqwestSnafu},
 };
 
-mod case_law;
-mod eo;
-mod legislation;
+pub mod case_law;
+pub mod eo;
+pub mod legislation;
 
 pub fn login(cfg: &MutexGuard<'_, Config>) -> Result<(), Error> {
-    let (mut file, cookie_store) = get_cookies()?;
-    let cookies = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store));
+    Ok(())
+}
+
+pub fn get_token(
+    cfg: &MutexGuard<'_, Config>,
+    cookies: Option<&Arc<reqwest_cookie_store::CookieStoreMutex>>,
+) -> Result<(Client, String), Error> {
+    let cookie_store;
+    if cookies.is_none() {
+        (_, cookie_store) = get_cookies()?;
+    } else {
+        cookie_store = CookieStore::default();
+    }
     let mut form = HashMap::new();
     form.insert("action", "query");
     form.insert("meta", "tokens");
     form.insert("type", "login");
     form.insert("format", "json");
     let client = Client::builder()
-        .cookie_provider(Arc::clone(&cookies))
+        .cookie_provider(Arc::clone(&cookies.unwrap_or(&Arc::new(
+            reqwest_cookie_store::CookieStoreMutex::new(cookie_store),
+        ))))
         .build()
         .context(ReqwestSnafu)?;
     let login = &client
-        .post(&cfg.endpoint)
-        .form(&form)
+        .get(&cfg.endpoint)
+        .query(&form)
         .send()
         .context(ReqwestSnafu)?
         .json::<Value>()
@@ -60,26 +73,42 @@ pub fn login(cfg: &MutexGuard<'_, Config>) -> Result<(), Error> {
         "Login failed: {}",
         &login
     );
-    cookies
-        .lock()
-        .unwrap()
-        .save(&mut file, |s| serde_json::to_string(s))
-        .expect("failed to save cookies");
-    Ok(())
-}
-
-pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
-    let (_, cookie_store) = get_cookies()?;
-    let cookies = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store));
-    let client = Client::builder()
-        .cookie_provider(Arc::clone(&cookies))
-        .build()
-        .context(ReqwestSnafu)?;
     let mut form = HashMap::new();
     form.insert("action", "query");
     form.insert("meta", "tokens");
-    form.insert("type", "csrf");
     form.insert("format", "json");
+    let response = client
+        .get(&cfg.endpoint)
+        .query(&form)
+        .send()
+        .context(ReqwestSnafu)?
+        .json::<Value>()
+        .context(ReqwestSnafu)?;
+    ensure_whatever!(
+        response["query"]["tokens"]["csrftoken"].as_str() != Some(r#"+\\"#),
+        "failed to get token: {}",
+        &response
+    );
+    Ok((client, response["query"]["tokens"]["csrftoken"]
+        .as_str()
+        .unwrap()
+        .to_string()))
+}
+
+pub fn upload(
+    name: &str,
+    token: (Client, String),
+    cfg: &MutexGuard<Config>,
+    content: String,
+) -> Result<(), Error> {
+    let client = token.0;
+    let mut form = HashMap::new();
+    form.insert("action", "edit");
+    form.insert("title", name);
+    form.insert("token", &token.1);
+    form.insert("format", "json");
+    form.insert("text", &content);
+    form.insert("assertuser", &cfg.login);
     let response = client
         .post(&cfg.endpoint)
         .form(&form)
@@ -87,15 +116,7 @@ pub fn get_token(cfg: &MutexGuard<'_, Config>) -> Result<String, Error> {
         .context(ReqwestSnafu)?
         .json::<Value>()
         .context(ReqwestSnafu)?;
-    ensure_whatever!(
-        response["query"]["tokens"]["csrftoken"].as_str().is_some(),
-        "failed to get token: {}",
-        &response
-    );
-    Ok(response["query"]["tokens"]["csrftoken"]
-        .as_str()
-        .unwrap()
-        .to_owned())
+    Ok(())
 }
 
 fn get_cookies() -> Result<(File, CookieStore), Error> {
@@ -134,8 +155,7 @@ mod tests {
 
     #[test]
     fn test_get_login() {
-        login(&CONFIG.lock().unwrap()).unwrap();
-        let _ = get_token(&CONFIG.lock().unwrap()).unwrap();
+        let token = get_token(&CONFIG.lock().unwrap(), None).unwrap();
         fs::remove_file(
             xdg::BaseDirectories::with_prefix("sd-archivemanager")
                 .unwrap()

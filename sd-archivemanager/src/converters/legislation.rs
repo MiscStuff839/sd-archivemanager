@@ -22,6 +22,7 @@ pub struct LegInfo {
     pub date: DateTime<Utc>,
     pub name: String,
     pub content: String,
+    pub link: String
 }
 
 pub fn scrape_law(
@@ -103,6 +104,7 @@ pub fn scrape_law(
             .unwrap(),
         name,
         content,
+        link: url.to_string()
     })
 }
 

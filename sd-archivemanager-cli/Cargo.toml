@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.36", features = ["derive"] }
 sd-archivemanager = { path = "../sd-archivemanager/" }
+tokio = { version = "1.44.2", features = ["rt-multi-thread"] }
 xdg = "2.5.2"

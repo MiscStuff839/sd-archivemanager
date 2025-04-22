@@ -1,13 +1,15 @@
-use std::{
+use std::{io::Write, path::PathBuf};
+
+use tokio::{
     fs::{self, OpenOptions},
-    io::Write,
-    path::PathBuf,
+    io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
 };
 
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
+use tokio::task;
 
-use crate::error::{Error, InvalidConfigSnafu, IoSnafu, XdgSnafu};
+use crate::error::{Error, InvalidConfigSnafu, IoSnafu, TokioSnafu, XdgSnafu};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PluginManifest {
@@ -25,48 +27,78 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    pub fn get_plugins(&self, user: &str) -> Vec<PluginManifest> {
+    pub fn get_plugins(&self, user: &str, target: &str) -> Vec<&PluginManifest> {
         match &self.plugins {
             None => vec![],
             Some(p) => {
-                let mut vec: Vec<PluginManifest> = p
+                let mut vec: Vec<&PluginManifest> = p
                     .iter()
                     .filter(|p| {
-                        p.author
+                        (p.author
                             .split(',')
                             .map(|y| y.trim())
                             .collect::<Vec<_>>()
                             .contains(&user)
-                            || p.author == "*".to_string()
+                            || &p.author == "*")
+                            && target == p.target
                     })
-                    .cloned()
                     .collect();
                 vec.sort_by(|x, y| x.name.cmp(&y.name));
                 vec
             }
         }
     }
-    pub fn save(&self) -> Result<(), Error> {
-        let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").context(XdgSnafu)?;
-        let path = xdg.place_data_file("plugins.toml").context(IoSnafu {
-            file: xdg.get_data_home().join("plugins.toml"),
-        })?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&path)
-            .context(IoSnafu { file: &path })?;
-        file.write_all(toml::to_string_pretty(self).unwrap().as_bytes())
-            .context(IoSnafu { file: &path })?;
-        Ok(())
-    }
-    pub fn load() -> Result<Self, Error> {
+    /// Saves current regex profiles to regex.toml
+    pub async fn save(&self) -> Result<(), Error> {
         let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").context(XdgSnafu)?;
         let path = xdg
-            .find_data_file("plugins.toml")
+            .place_data_file("regex.toml")
+            .context(IoSnafu {
+                file: xdg
+                    .get_data_home()
+                    .join("regex.toml")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+            })?
+            .as_path()
+            .to_owned();
+        let file = task::spawn({
+            let path = path.clone();
+            async move {
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(path)
+                    .await
+                    .unwrap()
+            }
+        });
+        if self.plugins.is_some() {
+            file.await
+                .context(TokioSnafu)?
+                .write_all(toml::to_string(self).unwrap().as_bytes())
+                .await
+                .context(IoSnafu {
+                    file: path.to_string_lossy().to_string(),
+                })?;
+        } else {
+            let mut file = file.await.context(TokioSnafu)?;
+            file.seek(SeekFrom::Start(1)).await.unwrap();
+            file.write_all(&[0]).await.unwrap();
+        }
+        Ok(())
+    }
+    /// Loads regex profiles from regex.toml
+    /// Should be used with [Result::unwrap_or_default]
+    pub async fn load() -> Result<Self, Error> {
+        let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").context(XdgSnafu)?;
+        let path = xdg
+            .find_data_file("regex.toml")
             .whatever_context("unable to find file")?;
-        let profiles = toml::from_str::<PluginManager>(
+        let profiles = toml::from_str::<Self>(
             fs::read_to_string(&path)
+                .await
                 .map_err(|e: std::io::Error| Error::IoError {
                     source: e,
                     file: path,
@@ -93,7 +125,7 @@ impl Default for PluginManager {
             })
             .unwrap();
         let plgs = PluginManager { plugins: None };
-        let mut file = OpenOptions::new()
+        let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .open(path)
@@ -102,4 +134,11 @@ impl Default for PluginManager {
             .unwrap();
         plgs
     }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginStage {
+    Post,
+    Pre,
 }

@@ -49,7 +49,7 @@ impl Config {
             })?;
         Ok(())
     }
-    pub fn load() -> Result<Config, Error> {
+    pub fn load() -> Result<Self, Error> {
         let xdg_dirs = xdg::BaseDirectories::with_prefix("sd-archivemanager").unwrap();
         let conf_file = xdg_dirs.find_config_file("config.toml");
         if conf_file.is_none() {

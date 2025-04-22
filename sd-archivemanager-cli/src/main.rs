@@ -2,10 +2,7 @@ use std::fs;
 
 use clap::Parser;
 use sd_archivemanager::{
-    converters::{
-        eo::handle_eo_id,
-        legislation::{handle_law, handle_law_id},
-    },
+    converters::{eo::handle_eo_id, legislation::handle_law_id},
     guilds::Guilds,
 };
 use xdg::BaseDirectories;
@@ -51,7 +48,8 @@ enum EOCommand {
     Upload { id: u64 },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let xdg = BaseDirectories::with_prefix("sd-archivemanager").unwrap();
     match args.command {
@@ -63,6 +61,7 @@ fn main() {
                         .as_str(),
                     id,
                 )
+                .await
                 .unwrap();
             }
         },
@@ -76,11 +75,12 @@ fn main() {
             match subcommand {
                 LawCommand::Upload { id } => handle_law_id(
                     fs::read_to_string(xdg.place_config_file("law_template").unwrap())
-                        .unwrap()
+                        .unwrap_or("{content}".to_string())
                         .as_str(),
                     id,
                     guild,
                 )
+                .await
                 .unwrap(),
             };
         }

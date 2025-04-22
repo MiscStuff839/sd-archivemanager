@@ -1,15 +1,17 @@
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{Seek, SeekFrom, Write},
-};
+use std::io::Write;
 
-use regex::Regex;
+use tokio::fs::{self, OpenOptions};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
+
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
+use tokio::{join, task, try_join};
 use xdg::BaseDirectories;
 
 use crate::error::*;
 
+/// This struct is used to store the regex profiles
+/// Is used as a generic struct to represent regex application for EOs, legislation and case law
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Profile {
     pub author: String,
@@ -20,11 +22,24 @@ pub struct Profile {
     pub target: String,
 }
 
+/// Representation of the regex.toml file which contains regex profiles
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RegexManager {
     pub profile: Option<Vec<Profile>>,
 }
+
 impl RegexManager {
+    /// Save regex profile to manager. NOTE: It does not save to file.
+    /// ```no_run
+    /// let mut rgx = RegexManager::default();
+    /// rgx.save_regex(
+    ///        "xyz".to_string(),
+    ///        "testuser",
+    ///        "Testing",
+    ///         false, "eo",
+    ///         "abc".to_string(),
+    ///         ).unwrap();
+    /// ```
     pub fn save_regex(
         &mut self,
         exp: String,
@@ -55,7 +70,8 @@ impl RegexManager {
         }
         Ok(())
     }
-    pub fn save(&self) -> Result<(), Error> {
+    /// Saves current regex profiles to regex.toml
+    pub async fn save(&self) -> Result<(), Error> {
         let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").context(XdgSnafu)?;
         let path = xdg.place_data_file("regex.toml").context(IoSnafu {
             file: xdg
@@ -64,30 +80,39 @@ impl RegexManager {
                 .to_str()
                 .unwrap()
                 .to_string(),
-        })?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&path)
-            .unwrap();
+        })?.as_path().to_owned();
+        let file = task::spawn({
+            let path = path.clone();
+            async move {
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(path)
+                .await
+                .unwrap()
+            }
+        });
         if self.profile.is_some() {
-            file.write_all(toml::to_string(self).unwrap().as_bytes())
+            file.await.context(TokioSnafu)?.write_all(toml::to_string(self).unwrap().as_bytes()).await
                 .context(IoSnafu {
-                    file: path.clone().to_string_lossy().to_string(),
+                    file: path.to_string_lossy().to_string(),
                 })?;
         } else {
-            file.seek(SeekFrom::Start(1)).unwrap();
-            file.write_all(&[0]).unwrap();
+            let mut file = file.await.context(TokioSnafu)?;
+            file.seek(SeekFrom::Start(1)).await.unwrap();
+            file.write_all(&[0]).await.unwrap();
         }
         Ok(())
     }
-    pub fn load() -> Result<Self, Error> {
+    /// Loads regex profiles from regex.toml
+    /// Should be used with [Result::unwrap_or_default]
+    pub async fn load() -> Result<Self, Error> {
         let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").context(XdgSnafu)?;
         let path = xdg
             .find_data_file("regex.toml")
             .whatever_context("unable to find file")?;
         let profiles = toml::from_str::<RegexManager>(
-            fs::read_to_string(&path)
+            fs::read_to_string(&path).await
                 .map_err(|e: std::io::Error| Error::IoError {
                     source: e,
                     file: path,
@@ -97,7 +122,16 @@ impl RegexManager {
         .context(InvalidConfigSnafu)?;
         Ok(profiles)
     }
-    pub fn get_regexs(&self, user: &str) -> Vec<Profile> {
+    /// Return all regex expressions valid for a given user. Accepts users via a csv or the glob oberator (*)
+    /// for examples,
+    /// ```no_run
+    /// config = r#"[profile]
+    /// author = "*"
+    /// ..."#
+    /// let regex = RegexManager::default();
+    /// assert_eq!(vec![Profile {author = "*", ...}], regex.get_regexs())
+    /// ```
+    pub fn get_regexs(&self, user: &str) -> Vec<&Profile> {
         match &self.profile {
             None => vec![],
             Some(p) => {
@@ -111,8 +145,7 @@ impl RegexManager {
                             .contains(&user)
                             || x.author == "*"
                     })
-                    .cloned()
-                    .collect::<Vec<Profile>>();
+                    .collect::<Vec<&Profile>>();
                 vec.sort_by(|x, y| x.name.cmp(&y.name));
                 vec
             }
@@ -138,7 +171,7 @@ impl Default for RegexManager {
             })
             .unwrap();
         let rgx = RegexManager { profile: None };
-        let mut file = OpenOptions::new()
+        let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .open(path)
@@ -155,40 +188,42 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_save_regex() {
+    #[tokio::test]
+    async fn test_save_regex() {
         let _ = fs::remove_file("/root/.local/share/sd-archivemanager/regex.toml");
         let mut rgx = RegexManager::default();
         rgx.save_regex(
             "xyz".to_string(),
             "testuser",
             "Testing",
-            false, "eo",
+            false,
+            "eo",
             "abc".to_string(),
         )
         .unwrap();
-        rgx.save().unwrap();
+        rgx.save().await.unwrap();
         let content =
-            fs::read_to_string("/root/.local/share/sd-archivemanager/regex.toml").unwrap();
+            fs::read_to_string("/root/.local/share/sd-archivemanager/regex.toml").await.unwrap();
         assert_eq!(
             content,
             "[[profile]]\nauthor = \"testuser\"\nregex = \"xyz\"\nfor_title = false\nname = \"Testing\"\nreplace = \"abc\"\ntarget = \"eo\"\n"
         );
         let _ = fs::remove_file("/root/.local/share/sd-archivemanager/regex.toml");
     }
-    #[test]
-    fn save_rgx_file() {
+    #[tokio::test]
+    async fn save_rgx_file() {
         let _ = fs::remove_file("/root/.local/share/sd-archivemanager/regex.toml");
         let mut rgx = RegexManager::default();
         rgx.save_regex(
             r#"\s"#.to_string(),
             "f3rri5_",
             "001-Replace spaces",
-            true, "eo",
+            true,
+            "eo",
             r#":"#.to_string(),
         )
         .unwrap();
-        rgx.save().unwrap();
+        rgx.save().await.unwrap();
         assert!(
             PathBuf::from_str("/root/.local/share/sd-archivemanager/regex.toml")
                 .unwrap()

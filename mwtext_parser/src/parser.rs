@@ -1,8 +1,7 @@
 use chumsky::{
     ConfigIterParser, IterParser, Parser,
-    combinator::{RepeatedCfg, To},
     input::ValueInput,
-    prelude::{choice, end, just, none_of},
+    prelude::{just, none_of},
     span::SimpleSpan,
 };
 

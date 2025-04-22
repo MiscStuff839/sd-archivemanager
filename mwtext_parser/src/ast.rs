@@ -1,4 +1,4 @@
-use std::{ops::Deref, result};
+use std::ops::Deref;
 
 use crate::lexer::Token;
 

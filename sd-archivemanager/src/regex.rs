@@ -5,7 +5,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
-use tokio::{join, task, try_join};
+use tokio::task;
 use xdg::BaseDirectories;
 
 use crate::error::*;

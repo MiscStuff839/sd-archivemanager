@@ -1,3 +1,4 @@
+#![allow(async_fn_in_trait)]
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
@@ -20,7 +21,7 @@ use xdg::BaseDirectories;
 use crate::{
     CONFIG,
     config::Config,
-    error::{Error, ExtismSnafu, IoSnafu, ReqwestSnafu, TokioSnafu},
+    error::{Error, ExtismSnafu, IoSnafu, ReqwestSnafu},
     guilds::GuildInfo,
     plugins::{PluginManager, PluginManifest, PluginStage},
     regex::RegexManager,
@@ -33,7 +34,7 @@ pub mod legislation;
 pub async fn get_token(
     cfg: &MutexGuard<'_, Config>,
     client: &Client,
-    xdg: &BaseDirectories,
+    _: &BaseDirectories,
 ) -> Result<String, Error> {
     let mut form = HashMap::new();
     form.insert("action", "query");
@@ -140,7 +141,9 @@ async fn get_cookies(
         let mut buf = vec![];
         let cookie_store = CookieStore::load(buf.as_slice(), |s| serde_json::from_str(s))
             .expect("cookies are broken");
-        file.read_to_end(&mut buf).await;
+        file.read_to_end(&mut buf).await.context(IoSnafu {
+            file: cookie_file.to_string_lossy().to_string(),
+        })?;
         Ok((
             file,
             Arc::new(reqwest_cookie_store::CookieStoreMutex::new(cookie_store)),
@@ -240,7 +243,7 @@ mod tests {
     async fn test_get_login() {
         let client = Client::builder().cookie_store(true).build().unwrap();
         let xdg = BaseDirectories::with_prefix("sd-archivemanager").unwrap();
-        let token = get_token(&CONFIG.lock().await, &client, &xdg)
+        let _ = get_token(&CONFIG.lock().await, &client, &xdg)
             .await
             .unwrap();
         fs::remove_file(xdg.place_data_file("cookies.json").unwrap()).unwrap();

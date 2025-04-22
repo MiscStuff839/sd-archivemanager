@@ -6,8 +6,8 @@ use snafu::{OptionExt, ResultExt};
 use std::sync::Arc;
 use tinytemplate::TinyTemplate;
 use tokio::{
-    sync::{Mutex, MutexGuard},
-    task::{self, LocalSet},
+    sync::MutexGuard,
+    task::{self},
     try_join,
 };
 use xdg::BaseDirectories;
@@ -15,11 +15,9 @@ use xdg::BaseDirectories;
 use crate::{
     CONFIG,
     config::Config,
-    error::{Error, ExtismSnafu, ReqwestSnafu, TokioSnafu, XdgSnafu},
+    error::{Error, ReqwestSnafu, TokioSnafu, XdgSnafu},
     format_auth,
     guilds::GuildInfo,
-    plugins::{PluginManager, PluginManifest, PluginStage},
-    regex::RegexManager,
 };
 
 use super::{PageData, get_cookies, get_token, upload};

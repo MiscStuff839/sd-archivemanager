@@ -1,18 +1,18 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
-use reqwest::{Client, redirect::Policy};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use snafu::{OptionExt, ResultExt};
 use std::sync::Arc;
 use tinytemplate::TinyTemplate;
-use tokio::{join, sync::MutexGuard, task, try_join};
+use tokio::{sync::MutexGuard, try_join};
 use url::Url;
 
 use crate::{
     CONFIG,
     config::Config,
-    error::{Error, InvalidRegexSnafu, ReqwestSnafu, TokioSnafu, XdgSnafu},
+    error::{Error, InvalidRegexSnafu, ReqwestSnafu, XdgSnafu},
     format_auth,
     guilds::GuildInfo,
 };

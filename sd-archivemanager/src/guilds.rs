@@ -3,10 +3,7 @@ use std::{fs::OpenOptions, io::Write};
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
 
-use crate::{
-    context_opt,
-    error::{Error, FileNotFoundSnafu, IoSnafu},
-};
+use crate::error::{Error, FileNotFoundSnafu, IoSnafu};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Guilds {
@@ -63,9 +60,7 @@ impl Guilds {
                 file: xdg.get_data_home().join("guilds.toml"),
             })?;
         let content = std::fs::read_to_string(&guilds_file).context(IoSnafu {
-            file: xdg
-                .get_data_home()
-                .join("guilds.toml")
+            file: xdg.get_data_home().join("guilds.toml"),
         })?;
         let guilds: Guilds = toml::from_str(&content).unwrap();
         Ok(guilds)

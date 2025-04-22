@@ -33,5 +33,9 @@ pub enum Error {
     #[snafu(display("Cookie store error: {}", source))]
     CookieStoreError { source: cookie_store::Error},
     #[snafu(display("Extism error: {}", source))]
-    ExtismError { source: extism::Error}
+    ExtismError { source: extism::Error},
+    #[snafu(display("Tokio error: {}", source))]
+    TokioError {
+        source: tokio::task::JoinError,
+    },
 }

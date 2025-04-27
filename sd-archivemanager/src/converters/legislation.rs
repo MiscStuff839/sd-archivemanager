@@ -2,7 +2,6 @@ use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use snafu::{OptionExt, ResultExt};
 use std::sync::Arc;
 use tinytemplate::TinyTemplate;
@@ -10,11 +9,7 @@ use tokio::{sync::MutexGuard, try_join};
 use url::Url;
 
 use crate::{
-    CONFIG,
-    config::Config,
-    error::{Error, InvalidRegexSnafu, ReqwestSnafu, XdgSnafu},
-    format_auth,
-    guilds::GuildInfo,
+    config::Config, error::{Error, InvalidRegexSnafu, ReqwestSnafu, XdgSnafu}, format_auth, guilds::GuildInfo, regex::Target, CONFIG
 };
 
 use super::{PageData, get_cookies, get_token, upload};
@@ -43,6 +38,12 @@ impl<'a> PageData<'a> for LawInfo {
         } else {
             cfg = conf.unwrap();
         }
+        #[derive(Debug, Deserialize)]
+        struct MsgInfo {
+            author: String,
+            timestamp: String,
+            content: String,
+        }
         let message = client
             .get(format!(
                 "https://discord.com/api/v10/channels/{}/messages/{}",
@@ -53,12 +54,12 @@ impl<'a> PageData<'a> for LawInfo {
             .send()
             .await
             .context(ReqwestSnafu)?
-            .json::<Value>()
+            .json::<MsgInfo>()
             .await
             .context(ReqwestSnafu)?;
         let rgx = Regex::new(r#"(https:\/\/[^])\s]+)"#).context(InvalidRegexSnafu)?;
         let url = Url::parse(
-            rgx.captures(message["content"].as_str().unwrap())
+            rgx.captures(&message.content)
                 .unwrap()
                 .extract::<1>()
                 .1[0],
@@ -92,13 +93,8 @@ impl<'a> PageData<'a> for LawInfo {
             }
         };
         Ok(LawInfo {
-            author: message["author"]["username"]
-                .as_str()
-                .whatever_context("invalid response")?
-                .to_string(),
-            date: message["timestamp"]
-                .as_str()
-                .whatever_context("invalid response")?
+            author: message.author.to_string(),
+            date: message.timestamp
                 .parse::<DateTime<Utc>>()
                 .unwrap()
                 .date_naive(),
@@ -170,7 +166,7 @@ pub async fn handle_law_id(template: &str, law_id: u64, guild: &GuildInfo) -> Re
         .add_template("template", &template)
         .whatever_context("invalid template")?;
     let cfg = CONFIG.lock().await;
-    law.format("legislation").await?;
+    law.format(Target::Legislation).await?;
     upload(
         &law.name,
         &client,

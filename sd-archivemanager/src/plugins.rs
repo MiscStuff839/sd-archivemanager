@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
 use tokio::task;
 
-use crate::error::{Error, InvalidConfigSnafu, IoSnafu, TokioSnafu, XdgSnafu};
+use crate::{error::{Error, InvalidConfigSnafu, IoSnafu, TokioSnafu, XdgSnafu}, regex::Target};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PluginManifest {
@@ -17,7 +17,7 @@ pub struct PluginManifest {
     pub author: String,
     pub pre: bool,
     pub post: bool,
-    pub target: String,
+    pub target: Target,
     pub path: PathBuf,
 }
 
@@ -27,7 +27,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    pub fn get_plugins(&self, user: &str, target: &str) -> Vec<&PluginManifest> {
+    pub fn get_plugins(&self, user: &str, target: Target) -> Vec<&PluginManifest> {
         match &self.plugins {
             None => vec![],
             Some(p) => {

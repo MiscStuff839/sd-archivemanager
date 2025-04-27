@@ -16,6 +16,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use snafu::{OptionExt, ResultExt, ensure_whatever};
+use crate::regex::Target;
 use xdg::BaseDirectories;
 
 use crate::{
@@ -205,8 +206,8 @@ pub trait PageData<'a>: Serialize + for<'de> Deserialize<'de> + Clone {
         *self = res.into_inner();
         Ok(())
     }
-    fn format_rgx(&mut self, rgx: &RegexManager) {
-        let patterns = rgx.get_regexs(&self.get_author());
+    fn format_rgx(&mut self, rgx: &RegexManager, target: Target) {
+        let patterns = rgx.get_regexs(&self.get_author(), target);
         for pat in patterns {
             let reg = Regex::new(&pat.regex).unwrap();
             if pat.for_title {
@@ -219,13 +220,14 @@ pub trait PageData<'a>: Serialize + for<'de> Deserialize<'de> + Clone {
             }
         }
     }
-    async fn format(&mut self, target: &str) -> Result<&Self, Error> {
+    async fn format(&mut self, target: Target) -> Result<&Self, Error> {
         let plugin_manager = task::spawn(async { PluginManager::load() });
         let rgx = task::spawn(async move { RegexManager::load() });
+        let tmp = rgx.await.unwrap().await?;
         let plugin_manager = plugin_manager.await.unwrap().await.unwrap_or_default();
         let plugins = plugin_manager.get_plugins(self.get_author(), target);
         self.format_plugins(&plugins, PluginStage::Pre).await?;
-        self.format_rgx(&rgx.await.unwrap().await.unwrap_or_default());
+        self.format_rgx(&tmp, target);
         self.format_plugins(&plugins, PluginStage::Post).await?;
         Ok(self)
     }

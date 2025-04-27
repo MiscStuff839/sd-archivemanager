@@ -1,7 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use snafu::{OptionExt, ResultExt};
 use std::sync::Arc;
 use tinytemplate::TinyTemplate;
@@ -13,11 +12,7 @@ use tokio::{
 use xdg::BaseDirectories;
 
 use crate::{
-    CONFIG,
-    config::Config,
-    error::{Error, ReqwestSnafu, TokioSnafu, XdgSnafu},
-    format_auth,
-    guilds::GuildInfo,
+    config::Config, error::{Error, ReqwestSnafu, TokioSnafu, XdgSnafu}, format_auth, guilds::GuildInfo, regex::Target, CONFIG
 };
 
 use super::{PageData, get_cookies, get_token, upload};
@@ -125,6 +120,16 @@ impl<'a> PageData<'a> for EOInfo {
             cfg = conf.unwrap();
         }
         let auth = format_auth(&cfg);
+        #[derive(Debug, Deserialize)]
+        struct MsgInfo {
+            author: String,
+            content: String,
+            timestamp: String,
+        }
+        #[derive(Debug, Deserialize)]
+        struct ChannelInfo {
+            name: String,
+        }
         let (message, channel) = try_join! {
             client
             .get(format!(
@@ -138,14 +143,12 @@ impl<'a> PageData<'a> for EOInfo {
         }
         .context(ReqwestSnafu)?;
         let (message, channel) =
-            try_join!(message.json::<Value>(), channel.json::<Value>()).context(ReqwestSnafu)?;
+            try_join!(message.json::<MsgInfo>(), channel.json::<ChannelInfo>()).context(ReqwestSnafu)?;
         Ok(EOInfo {
-            author: message["author"]["username"].as_str().unwrap().to_string(),
-            name: channel["name"].as_str().unwrap().to_string(),
-            content: message["content"].as_str().unwrap().to_string(),
-            date: message["timestamp"]
-                .as_str()
-                .unwrap()
+            author: message.author,
+            name: channel.name,
+            content: message.content,
+            date: message.timestamp
                 .parse::<DateTime<Utc>>()
                 .unwrap()
                 .date_naive(),
@@ -216,7 +219,7 @@ pub async fn handle_eo_id(template: &str, eo_id: u64) -> Result<(), Error> {
         .whatever_context("invalid template")?;
     let cfg = CONFIG.lock().await;
     let mut eo = eo_handle.await.context(TokioSnafu)?.await?;
-    eo.format("eo").await?;
+    eo.format(Target::EO).await?;
     upload(
         &eo.name,
         &client,

@@ -19,7 +19,7 @@ pub struct Profile {
     pub for_title: bool,
     pub name: String,
     pub replace: String,
-    pub target: String,
+    pub target: Target,
 }
 
 /// Representation of the regex.toml file which contains regex profiles
@@ -46,7 +46,7 @@ impl RegexManager {
         user: &str,
         name: &str,
         for_title: bool,
-        target: &str,
+        target: Target,
         replace: String,
     ) -> Result<(), Error> {
         if let Some(ref mut profiles_vec) = self.profile {
@@ -56,7 +56,7 @@ impl RegexManager {
                 for_title,
                 name: name.to_string(),
                 replace,
-                target: target.to_string(),
+                target,
             });
         } else {
             self.profile = Some(vec![Profile {
@@ -65,7 +65,7 @@ impl RegexManager {
                 for_title,
                 name: name.to_string(),
                 replace,
-                target: target.to_string(),
+                target,
             }]);
         }
         Ok(())
@@ -131,19 +131,19 @@ impl RegexManager {
     /// let regex = RegexManager::default();
     /// assert_eq!(vec![Profile {author = "*", ...}], regex.get_regexs())
     /// ```
-    pub fn get_regexs(&self, user: &str) -> Vec<&Profile> {
+    pub fn get_regexs(&self, user: &str, target: Target) -> Vec<&Profile> {
         match &self.profile {
             None => vec![],
             Some(p) => {
                 let mut vec = p
                     .iter()
                     .filter(|x| {
-                        x.author
+                        (x.author
                             .split(',')
                             .map(|y| y.trim())
                             .collect::<Vec<_>>()
                             .contains(&user)
-                            || x.author == "*"
+                            || x.author == "*") && target == x.target
                     })
                     .collect::<Vec<&Profile>>();
                 vec.sort_by(|x, y| x.name.cmp(&y.name));
@@ -182,6 +182,14 @@ impl Default for RegexManager {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum Target {
+    Legislation,
+    EO,
+    CaseLaw,
+}
+
 #[cfg(test)]
 mod tests {
     use std::{path::PathBuf, str::FromStr};
@@ -197,7 +205,7 @@ mod tests {
             "testuser",
             "Testing",
             false,
-            "eo",
+            Target::EO,
             "abc".to_string(),
         )
         .unwrap();
@@ -219,7 +227,7 @@ mod tests {
             "f3rri5_",
             "001-Replace spaces",
             true,
-            "eo",
+            Target::EO,
             r#":"#.to_string(),
         )
         .unwrap();

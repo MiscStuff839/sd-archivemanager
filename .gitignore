@@ -4,3 +4,4 @@
 /binaryen*
 /extism.sh
 /plugins/*.wasm
+/Cargo.lock

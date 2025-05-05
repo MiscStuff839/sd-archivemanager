@@ -2,9 +2,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use snafu::{OptionExt, ResultExt};
 use std::sync::Arc;
-use tinytemplate::TinyTemplate;
+use tinytemplate::{format_unescaped, TinyTemplate};
 use tokio::{sync::MutexGuard, try_join};
 use url::Url;
 
@@ -40,7 +41,7 @@ impl<'a> PageData<'a> for LawInfo {
         }
         #[derive(Debug, Deserialize)]
         struct MsgInfo {
-            author: String,
+            author: Value,
             timestamp: String,
             content: String,
         }
@@ -93,7 +94,9 @@ impl<'a> PageData<'a> for LawInfo {
             }
         };
         Ok(LawInfo {
-            author: message.author.to_string(),
+            author: message.author["username"]
+                .as_str().unwrap()
+                .to_string(),
             date: message.timestamp
                 .parse::<DateTime<Utc>>()
                 .unwrap()
@@ -162,19 +165,20 @@ pub async fn handle_law_id(template: &str, law_id: u64, guild: &GuildInfo) -> Re
     let mut law = LawInfo::scrape(law_id, None, law_client, Some(guild))
         .await?;
     let mut templater: TinyTemplate<'_> = TinyTemplate::new();
+    templater.set_default_formatter(&format_unescaped);
     templater
         .add_template("template", &template)
         .whatever_context("invalid template")?;
     let cfg = CONFIG.lock().await;
-    law.format(Target::Legislation).await?;
+    law.format(Target::Legislation, &cfg).await?;
     upload(
         &law.name,
         &client,
         &get_token(&cfg, &client, &xdg).await?,
         &cfg,
         &templater
-            .render("template", &law)
-            .whatever_context("failed to render")?,
+        .render("template", &law)
+        .whatever_context("failed to render")?,
     ).await?;
     cookies
         .lock()

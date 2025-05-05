@@ -219,7 +219,7 @@ pub async fn handle_eo_id(template: &str, eo_id: u64) -> Result<(), Error> {
         .whatever_context("invalid template")?;
     let cfg = CONFIG.lock().await;
     let mut eo = eo_handle.await.context(TokioSnafu)?.await?;
-    eo.format(Target::EO).await?;
+    eo.format(Target::EO, &cfg).await?;
     upload(
         &eo.name,
         &client,

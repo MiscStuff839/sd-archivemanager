@@ -94,7 +94,7 @@ impl PluginManager {
     pub async fn load() -> Result<Self, Error> {
         let xdg = xdg::BaseDirectories::with_prefix("sd-archivemanager").context(XdgSnafu)?;
         let path = xdg
-            .find_data_file("regex.toml")
+            .find_data_file("plugins.toml")
             .whatever_context("unable to find file")?;
         let profiles = toml::from_str::<Self>(
             fs::read_to_string(&path)

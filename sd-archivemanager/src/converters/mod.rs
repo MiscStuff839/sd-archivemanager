@@ -8,6 +8,7 @@ use tokio::{
     task,
 };
 
+use crate::regex::Target;
 use chrono::NaiveDate;
 use cookie_store::CookieStore;
 use extism::{Manifest, Plugin, Wasm, convert::Json};
@@ -16,11 +17,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use snafu::{OptionExt, ResultExt, ensure_whatever};
-use crate::regex::Target;
 use xdg::BaseDirectories;
 
 use crate::{
-    CONFIG,
     config::Config,
     error::{Error, ExtismSnafu, IoSnafu, ReqwestSnafu},
     guilds::GuildInfo,
@@ -99,7 +98,6 @@ pub async fn get_token(
         .unwrap()
         .to_string())
 }
-
 pub async fn upload<'a>(
     name: &'a str,
     client: &Client,
@@ -118,9 +116,6 @@ pub async fn upload<'a>(
         .post(&cfg.endpoint)
         .form(&form)
         .send()
-        .await
-        .context(ReqwestSnafu)?
-        .json::<Value>()
         .await
         .context(ReqwestSnafu)?;
     Ok(())
@@ -178,11 +173,11 @@ pub trait PageData<'a>: Serialize + for<'de> Deserialize<'de> + Clone {
         &mut self,
         plugins: &Vec<&PluginManifest>,
         stage: PluginStage,
+        cfg: &MutexGuard<'_, Config>,
     ) -> Result<(), Error>
     where
         Self: Sized,
     {
-        let cfg = task::spawn(async { CONFIG.lock().await });
         let mut iter = plugins
             .iter()
             .filter(|p| match stage {
@@ -192,13 +187,18 @@ pub trait PageData<'a>: Serialize + for<'de> Deserialize<'de> + Clone {
             .peekable();
         let mut res = Json::from(self.clone());
         if iter.peek().is_some() {
-            let cfg = cfg.await.unwrap();
             while {
                 let manifest = Manifest::new([Wasm::file(&iter.next().unwrap().path)])
                     .with_config_key("token", &cfg.token);
                 let mut plugin = Plugin::new(&manifest, [], true).context(ExtismSnafu)?;
                 res = plugin
-                    .call::<_, Json<Self>>("pre", serde_json::to_vec(&self).unwrap())
+                    .call::<_, Json<Self>>(
+                        match stage {
+                            PluginStage::Post => "post",
+                            PluginStage::Pre => "pre",
+                        },
+                        serde_json::to_vec(&self).unwrap(),
+                    )
                     .context(ExtismSnafu)?;
                 iter.peek().is_some()
             } {} // do while loop
@@ -220,15 +220,20 @@ pub trait PageData<'a>: Serialize + for<'de> Deserialize<'de> + Clone {
             }
         }
     }
-    async fn format(&mut self, target: Target) -> Result<&Self, Error> {
+    async fn format(
+        &mut self,
+        target: Target,
+        cfg: &MutexGuard<'_, Config>,
+    ) -> Result<&Self, Error> {
         let plugin_manager = task::spawn(async { PluginManager::load() });
         let rgx = task::spawn(async move { RegexManager::load() });
-        let tmp = rgx.await.unwrap().await?;
-        let plugin_manager = plugin_manager.await.unwrap().await.unwrap_or_default();
+        let rgx = rgx.await.unwrap().await?;
+        let plugin_manager = plugin_manager.await.unwrap().await.unwrap();
         let plugins = plugin_manager.get_plugins(self.get_author(), target);
-        self.format_plugins(&plugins, PluginStage::Pre).await?;
-        self.format_rgx(&tmp, target);
-        self.format_plugins(&plugins, PluginStage::Post).await?;
+        self.format_plugins(&plugins, PluginStage::Pre, cfg).await?;
+        self.format_rgx(&rgx, target);
+        self.format_plugins(&plugins, PluginStage::Post, cfg)
+            .await?;
         Ok(self)
     }
 }

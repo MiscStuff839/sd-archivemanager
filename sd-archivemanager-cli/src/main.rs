@@ -40,6 +40,9 @@ enum Command {
     Law {
         #[clap(subcommand)]
         subcommand: LawCommand,
+        #[clap(short, long)]
+        /// Specify the categories to upload to
+        categories: Vec<String>,
     },
 }
 #[derive(Debug, clap::Subcommand)]
@@ -65,7 +68,10 @@ async fn main() {
                 .unwrap();
             }
         },
-        Command::Law { subcommand } => {
+        Command::Law {
+            subcommand,
+            categories,
+        } => {
             let guildman = Guilds::load().unwrap_or_default();
             let guild = guildman
                 .get_guilds()
@@ -73,15 +79,18 @@ async fn main() {
                 .find(|g| g.name == args.guild)
                 .unwrap_or_else(|| panic!("Guild {} not found", args.guild));
             match subcommand {
-                LawCommand::Upload { id } => handle_law_id(
-                    fs::read_to_string(xdg.place_config_file("law_template").unwrap())
-                        .unwrap_or("{content}".to_string())
-                        .as_str(),
-                    id,
-                    guild,
-                )
-                .await
-                .unwrap(),
+                LawCommand::Upload { id } => {
+                    let template = format!(
+                        "{}\n{}",
+                        categories
+                            .iter()
+                            .map(|x| format!("[[Category:{}]] ", x))
+                            .collect::<String>(),
+                        fs::read_to_string(xdg.place_config_file("law_template").unwrap())
+                            .unwrap_or(format!("{{content}}"))
+                    );
+                    handle_law_id(&template, id, guild).await.unwrap()
+                }
             };
         }
     }

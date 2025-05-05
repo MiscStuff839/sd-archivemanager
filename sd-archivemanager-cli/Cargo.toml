@@ -8,3 +8,9 @@ clap = { version = "4.5.36", features = ["derive"] }
 sd-archivemanager = { path = "../sd-archivemanager/" }
 tokio = { version = "1.44.2", features = ["rt-multi-thread"] }
 xdg = "2.5.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+
